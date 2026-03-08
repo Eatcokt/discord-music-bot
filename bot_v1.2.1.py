@@ -18,6 +18,13 @@ import spotipy
 from spotipy.oauth2 import SpotifyOAuth
 
 queue_lock = threading.Lock()  # global lock for queue operations
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from webdriver_manager.chrome import ChromeDriverManager
 
 REDIRECT_URI = "http://127.0.0.1:8888/callback"
 
@@ -68,13 +75,6 @@ async def scrape_playlist_page(ctx, url: str, service: str = "Unknown"):
     Unified browser-based playlist scraper.
     Preserves nearly identical logic from both original scrapers.
     """
-    from selenium import webdriver
-    from selenium.webdriver.chrome.service import Service
-    from selenium.webdriver.chrome.options import Options
-    from selenium.webdriver.common.by import By
-    from selenium.webdriver.support.ui import WebDriverWait
-    from selenium.webdriver.support import expected_conditions as EC
-    from webdriver_manager.chrome import ChromeDriverManager
 
     guild_id = ctx.guild.id
 
@@ -99,14 +99,14 @@ async def scrape_playlist_page(ctx, url: str, service: str = "Unknown"):
         scroll_attempts = 0
         while scroll_attempts < 25:
             driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-            time.sleep(2.2 if service.lower() == "spotify" else 2.5)
+            time.sleep(0.1 if service.lower() == "spotify" else 0.2)
             new_height = driver.execute_script("return document.body.scrollHeight")
             if new_height == last_height:
                 break
             last_height = new_height
             scroll_attempts += 1
 
-        time.sleep(4)
+        time.sleep(0.3)
         print(f"[{service.upper()} SCRAPER] Scrolled {scroll_attempts} times")
 
         # Playlist name heuristic
