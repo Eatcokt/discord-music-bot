@@ -175,9 +175,7 @@ async def play(ctx, *, query: str = None):
 
                 except spotipy.exceptions.SpotifyException as se:
                     if se.http_status in (403, 404):
-                        # Exact same scraper logic as Apple Music — no changes
-                        await ctx.send("Spotify API blocked (403/404) → scraping page like Apple Music...")
-
+                        print("[SCRAPER] Starting page scrape for:", query)
                         from selenium import webdriver
                         from selenium.webdriver.chrome.service import Service
                         from selenium.webdriver.chrome.options import Options
@@ -199,10 +197,12 @@ async def play(ctx, *, query: str = None):
                             driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
                             driver.get(query)
 
-                            WebDriverWait(driver, 20).until(
-                                EC.presence_of_element_located((By.CSS_SELECTOR, "div[role='row'], div[data-testid*='track']"))
+                            print("[SCRAPER] Waiting for track elements...")
+                            WebDriverWait(driver, 25).until(
+                                EC.presence_of_element_located((By.CSS_SELECTOR, "div[role='row'], div[data-testid*='track'], div.TrackListRow, div.song"))
                             )
 
+                            print("[SCRAPER] Scrolling...")
                             last_height = driver.execute_script("return document.body.scrollHeight")
                             scroll_attempts = 0
                             while scroll_attempts < 25:
@@ -215,36 +215,50 @@ async def play(ctx, *, query: str = None):
                                 scroll_attempts += 1
 
                             time.sleep(4)
+                            print("[SCRAPER] Scrolled", scroll_attempts, "times")
 
                             playlist_name = driver.title.split("—")[0].strip()
                             playlist_name = re.sub(r"[\u200b\u200c\u200d\ufeff]", "", playlist_name)
+                            print("[SCRAPER] Playlist name:", playlist_name)
 
                             await ctx.send(f"Playlist: **{playlist_name}** (scrolled {scroll_attempts} times)")
 
-                            tracks = []
+                            # Selectors for rows (works for both Spotify and Apple Music)
                             row_selectors = [
                                 "div[role='row']",
                                 "div[data-testid*='track']",
                                 "div.TrackListRow",
                                 "div[class*='Row']",
                                 "div.song",
-                                "li.track"
+                                "li.track",
+                                "div.track-item"
                             ]
 
                             rows = []
                             for sel in row_selectors:
                                 rows += driver.find_elements(By.CSS_SELECTOR, sel)
-                                if len(rows) > 5:
+                                print(f"[SCRAPER] Selector '{sel}' found {len(rows)} rows")
+                                if len(rows) > 10:
                                     break
 
-                            if not rows:
+                            if len(rows) < 5:
+                                print("[SCRAPER] No specific rows → using broad div fallback")
                                 rows = driver.find_elements(By.CSS_SELECTOR, "div")
 
+                            tracks = []
                             seen = set()
+
                             for row in rows[:100]:
                                 try:
+                                    # Title selectors (priority order)
                                     title = ""
-                                    for ts in ["[data-testid*='title']", "a[href*='/track/']", "span[class*='title']", "div[class*='song-title']", "h3", "h4", "span"]:
+                                    title_selectors = [
+                                        "a[href*='/track/'], a[href*='/song/']",
+                                        "span[data-testid*='title'], span.title",
+                                        "div.title, div.song-name",
+                                        "h3, h4, span"
+                                    ]
+                                    for ts in title_selectors:
                                         try:
                                             el = row.find_element(By.CSS_SELECTOR, ts)
                                             title = el.text.strip()
@@ -253,17 +267,57 @@ async def play(ctx, *, query: str = None):
                                         except:
                                             pass
 
+                                    # Smarter artist extraction: look 1-2 rows/siblings BELOW the title
                                     artist = "Unknown Artist"
-                                    for asel in ["[data-testid*='artist']", "a[href*='/artist/']", "span[class*='byline']", "span[class*='artist']", "div[class*='artist-name']"]:
+
+                                    if title:  # only try if we have a title
+                                        # 1. Try to find the title element we just used
+                                        title_el = None
+                                        title_selectors = [
+                                            "a[href*='/track/']",
+                                            "span[data-testid*='title']",
+                                            "div.title, div.song-name",
+                                            "span.title",
+                                            "h3, h4, span"
+                                        ]
+                                        for ts in title_selectors:
+                                            try:
+                                                title_el = row.find_element(By.CSS_SELECTOR, ts)
+                                                if title_el.text.strip() == title:
+                                                    break
+                                            except:
+                                                pass
+
+                                        if title_el:
+                                            # Look for following siblings (1-2 levels down)
+                                            following = title_el.find_elements(By.XPATH, "./following::*[position() <= 5]")
+                                            for sib in following:
+                                                sib_text = sib.text.strip()
+                                                if len(sib_text) > 2:
+                                                    # Look for artist patterns
+                                                    if " by " in sib_text.lower():
+                                                        artist = sib_text.split(" by ", 1)[-1].strip()
+                                                        break
+                                                    if sib.get_attribute("href") and "/artist/" in sib.get_attribute("href"):
+                                                        artist = sib_text
+                                                        break
+                                                    # Common artist name heuristic (not "feat.", not numeric, not too long)
+                                                    if "feat." not in sib_text.lower() and not sib_text.isdigit() and len(sib_text) < 40:
+                                                        artist = sib_text.split("E\n", 1)[-1].strip()
+                                                        break
+
+                                    # Fallback to same-row artist link if siblings failed
+                                    if artist == "Unknown Artist":
                                         try:
-                                            el = row.find_element(By.CSS_SELECTOR, asel)
-                                            artist = el.text.strip()
-                                            if len(artist) > 2 and "by " not in artist.lower():
-                                                break
+                                            artist_el = row.find_element(By.CSS_SELECTOR, "a[href*='/artist/']")
+                                            artist = artist_el.text.strip()
                                         except:
                                             pass
+                                    if artist == "Unknown Artist":
+                                        artist = title
+                                    print(f"[SCRAPER] Title: '{title}' → Artist: '{artist}'")
 
-                                    if title and len(title) > 2:
+                                    if title and len(title) > 2 and artist != "Unknown Artist":
                                         key = (artist.lower(), title.lower())
                                         if key in seen:
                                             continue
@@ -271,16 +325,19 @@ async def play(ctx, *, query: str = None):
                                         q = f"ytsearch:{artist} {title} official audio"
                                         with queue_lock:
                                             queues[guild_id].append((q, f"{artist} - {title}", ctx.author))
+                                        print(f"[SCRAPER] Added: {artist} - {title}")
                                 except:
                                     continue
 
                             driver.quit()
 
                             added = len(seen)
+                            print(f"[SCRAPER] Final unique tracks: {added}")
+
                             if added == 0:
-                                await ctx.send("Scrape found 0 tracks (page may require login). Try manual search.")
+                                await ctx.send("Page scrape found 0 tracks (possibly login required or page changed). Try manual search.")
                             else:
-                                await ctx.send(f"✅ Extracted **{added}** unique songs from page scrape!")
+                                await ctx.send(f"✅ Extracted **{added}** unique songs (title + artist) from page scrape!")
 
                             await asyncio.sleep(4)
 
@@ -292,12 +349,9 @@ async def play(ctx, *, query: str = None):
                         except Exception as e:
                             if 'driver' in locals():
                                 driver.quit()
-                            await ctx.send(f"Scraper failed: {str(e)[:180]}")
+                            print("[SCRAPER ERROR]", str(e))
+                            await ctx.send(f"Scraper failed: {str(e)[:150]}")
                             return
-
-                    else:
-                        await ctx.send(f"Spotify API error: {str(se)[:200]}")
-                        return
 
             elif "/album/" in query or query.startswith("spotify:album:"):
                 alb_id = query.split("/")[-1].split("?")[0].split(":")[-1]
@@ -525,8 +579,6 @@ async def skip(ctx, count: int = 1):
     if not ctx.voice_client or not ctx.voice_client.is_playing():
         await ctx.send("Nothing is playing!")
         return
-    ctx.voice_client.stop()
-    await ctx.send("Skipped! ⏭️")
 
 @bot.command(name="stop")
 async def stop(ctx):
@@ -560,7 +612,7 @@ async def show_queue(ctx):
         line_length = len(line)
 
         # Check if adding this line would exceed 2000 chars
-        if current_length + line_length > 2000:
+        if current_length + line_length + len(f"... + {total - (i - 1)} more songs") > 2000:
             remaining = total - (i - 1)
             msg += f"... + {remaining} more songs"
             break
