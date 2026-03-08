@@ -7,7 +7,7 @@ Open PowerShell: Search for "PowerShell" in the Start Menu and select the standa
 # Set the Execution Policy: 
 Run the following command to allow the execution of scripts downloaded from the internet for your current user scope:
         Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
-Type Y and press Enter when prompted to confirm the change.
+<br>Type Y and press Enter when prompted to confirm the change.<br>
         Invoke-RestMethod -Uri https://get.scoop.sh | Invoke-Expression
 
 # then run: 
