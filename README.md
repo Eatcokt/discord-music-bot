@@ -15,7 +15,10 @@ scoop install python
 
 # Setting up the environment
 
-create a virtual environment for python using: python -m venv venv
-then use powershell and cd to folder and run: venv\scripts\activate 
-run: pip install discord spotipy yt_dlp dotenv
-run: bot.py (whatever version it is called)
+create a virtual environment for python using: 
+<br>python -m venv venv<br>
+then use powershell and cd to folder and run: 
+<br>venv\scripts\activate<br> 
+run: 
+<br>pip install discord spotipy yt_dlp dotenv<br>
+run: <br>bot.py (whatever version it is called)<br>
